@@ -1,0 +1,26 @@
+# USD per 1M tokens (Groq on-demand list prices - verify at https://groq.com/pricing).
+# The free tier bills $0, but tracking list price shows what production traffic would cost
+# and drives the cost alarms.
+models:
+  openai/gpt-oss-120b:
+    input: 0.15
+    output: 0.60
+  openai/gpt-oss-20b:
+    input: 0.075
+    output: 0.30
+  openai/gpt-oss-safeguard-20b:
+    input: 0.075
+    output: 0.30
+  meta-llama/llama-prompt-guard-2-86m:
+    input: 0.04
+    output: 0.04
+  meta-llama/llama-prompt-guard-2-22m:
+    input: 0.03
+    output: 0.03
+  qwen/qwen3.8-27b:
+    input: 0.29
+    output: 0.59
+# Used for any model not listed above, so unknown models are never counted as free.
+default:
+  input: 1.00
+  output: 1.00

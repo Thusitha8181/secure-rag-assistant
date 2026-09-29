@@ -1,0 +1,60 @@
+name: secure-rag-assistant
+
+x-backend-env: &backend-env
+  QDRANT_URL: http://qdrant:6333
+  USAGE_BACKEND: dynamodb
+  USAGE_CREATE_TABLE: "true"
+  DYNAMODB_ENDPOINT: http://dynamodb:8000
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: local
+  AWS_SECRET_ACCESS_KEY: local
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    ports: ["${QDRANT_HOST_PORT:-6333}:6333"]
+    volumes: ["qdrant_storage:/qdrant/storage"]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    ports: ["${DYNAMODB_HOST_PORT:-8001}:8000"]
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: api
+    env_file: [{ path: .env, required: false }]
+    environment: *backend-env
+    ports: ["${BACKEND_HOST_PORT:-8000}:8000"]
+    depends_on:
+      qdrant: { condition: service_healthy }
+      dynamodb: { condition: service_started }
+
+  ingest:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: ingest
+    env_file: [{ path: .env, required: false }]
+    environment: *backend-env
+    depends_on:
+      qdrant: { condition: service_healthy }
+
+  frontend:
+    build:
+      context: frontend
+    environment:
+      BACKEND_URL: http://backend:8000
+    ports: ["${FRONTEND_HOST_PORT:-3000}:3000"]
+    depends_on: [backend]
+
+volumes:
+  qdrant_storage:

@@ -1,0 +1,33 @@
+# Seeded demo users - one per role. All use the demo password "demo1234".
+# Generate a new hash with: uv run python -m app.auth.security hash '<password>'
+users:
+  - username: fiona.finance
+    name: Fiona Fernandes
+    title: Finance Manager
+    role: finance
+    password_hash: "$2b$12$uKfmk9hVI.xd3GDkmvzzHuVVf2DvKY.yia2z2LnquNh/Og2e/3zEi"
+  - username: mark.marketing
+    name: Mark Mehta
+    title: Marketing Lead
+    role: marketing
+    password_hash: "$2b$12$uKfmk9hVI.xd3GDkmvzzHuVVf2DvKY.yia2z2LnquNh/Og2e/3zEi"
+  - username: hana.hr
+    name: Hana Hussain
+    title: HR Business Partner
+    role: hr
+    password_hash: "$2b$12$uKfmk9hVI.xd3GDkmvzzHuVVf2DvKY.yia2z2LnquNh/Og2e/3zEi"
+  - username: eli.engineering
+    name: Eli Easwaran
+    title: Staff Engineer
+    role: engineering
+    password_hash: "$2b$12$uKfmk9hVI.xd3GDkmvzzHuVVf2DvKY.yia2z2LnquNh/Og2e/3zEi"
+  - username: cara.ceo
+    name: Cara Chandran
+    title: Chief Executive Officer
+    role: c_level
+    password_hash: "$2b$12$uKfmk9hVI.xd3GDkmvzzHuVVf2DvKY.yia2z2LnquNh/Og2e/3zEi"
+  - username: evan.employee
+    name: Evan Edwards
+    title: Associate
+    role: employee
+    password_hash: "$2b$12$uKfmk9hVI.xd3GDkmvzzHuVVf2DvKY.yia2z2LnquNh/Og2e/3zEi"
