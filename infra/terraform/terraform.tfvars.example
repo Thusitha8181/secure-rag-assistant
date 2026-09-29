@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars (gitignored) and adjust.
+# Secrets are NOT set here - export them so they stay out of files and state:
+#   export TF_VAR_groq_api_key=...        # required for the assistant to answer
+#   export TF_VAR_langsmith_api_key=...   # optional (set langsmith_tracing = false without it)
+
+alert_email       = "you@example.com"
+github_repository = "your-github-user/secure-rag-assistant"
+
+# aws_region         = "us-east-1"
+# monthly_budget_usd = 60
+# use_fargate_spot   = true
+
+# HTTPS (recommended beyond a quick demo):
+# certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+# domain_name     = "chat.example.com"
+# route53_zone_id = "Z0123456789ABC"
+
+# Set false if the account already has the GitHub Actions OIDC provider.
+# create_github_oidc_provider = false
