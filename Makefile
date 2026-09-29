@@ -72,4 +72,7 @@ tf-apply: ## terraform apply
 destroy: ## Tear down all AWS resources (stops all cost)
 	cd $(TF) && terraform destroy
 
-.PHONY: help install up down logs ingest infra-local ingest-local dev-backend dev-frontend lint typecheck test evals-fast evals tf-init tf-plan tf-apply destroy
+gh-vars: ## Copy Terraform outputs into GitHub Actions repository variables (needs gh auth)
+	terraform -chdir=$(TF) output -json github_variables | python3 infra/scripts/set-github-vars.py
+
+.PHONY: help install up down logs ingest infra-local ingest-local dev-backend dev-frontend lint typecheck test evals-fast evals tf-init tf-plan tf-apply destroy gh-vars

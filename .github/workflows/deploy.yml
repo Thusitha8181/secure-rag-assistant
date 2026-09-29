@@ -1,0 +1,196 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_ingest:
+        description: Skip the one-off ingestion task
+        type: boolean
+        default: false
+      skip_evals:
+        description: Skip post-deploy evals (emergency only)
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  deploy:
+    name: Build, push and deploy
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    timeout-minutes: 60
+    outputs:
+      backend_previous: ${{ steps.snapshot.outputs.backend }}
+      frontend_previous: ${{ steps.snapshot.outputs.frontend }}
+      ran_ingest: ${{ steps.ingest.outputs.ran }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Image names
+        id: images
+        run: |
+          prefix="${{ vars.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY_PREFIX }}"
+          echo "backend=${prefix}/backend:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "frontend=${prefix}/frontend:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "ingest=${prefix}/ingest:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: api
+          push: true
+          tags: |
+            ${{ steps.images.outputs.backend }}
+            ${{ vars.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY_PREFIX }}/backend:latest
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build and push ingest
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: ingest
+          push: true
+          tags: |
+            ${{ steps.images.outputs.ingest }}
+            ${{ vars.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY_PREFIX }}/ingest:latest
+          cache-from: type=gha,scope=ingest
+          cache-to: type=gha,mode=max,scope=ingest
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.images.outputs.frontend }}
+            ${{ vars.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY_PREFIX }}/frontend:latest
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Snapshot running task definitions
+        id: snapshot
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          chmod +x infra/scripts/ecs-deploy.sh
+          echo "backend=$(infra/scripts/ecs-deploy.sh current backend)" >> "$GITHUB_OUTPUT"
+          echo "frontend=$(infra/scripts/ecs-deploy.sh current frontend)" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy new task definitions
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          BACKEND_TASK_FAMILY: ${{ vars.BACKEND_TASK_FAMILY }}
+          FRONTEND_TASK_FAMILY: ${{ vars.FRONTEND_TASK_FAMILY }}
+        run: |
+          infra/scripts/ecs-deploy.sh update backend "${{ steps.images.outputs.backend }}"
+          infra/scripts/ecs-deploy.sh update frontend "${{ steps.images.outputs.frontend }}"
+          infra/scripts/ecs-deploy.sh wait backend frontend
+
+      - name: Re-index documents when data or ingestion code changed
+        id: ingest
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          INGEST_TASK_FAMILY: ${{ vars.INGEST_TASK_FAMILY }}
+          INGEST_SUBNETS: ${{ vars.INGEST_SUBNETS }}
+          INGEST_SECURITY_GROUP: ${{ vars.INGEST_SECURITY_GROUP }}
+          INGEST_LOG_GROUP: ${{ vars.INGEST_LOG_GROUP }}
+        run: |
+          should=false
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            [[ "${{ inputs.skip_ingest }}" == "true" ]] || should=true
+          elif [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]]; then
+            should=true
+          elif git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" \
+                | grep -Eq '^(data/|backend/app/ingestion/|backend/app/retrieval/|backend/app/rbac/)'; then
+            should=true
+          fi
+          echo "ran=$should" >> "$GITHUB_OUTPUT"
+          if [[ "$should" == "true" ]]; then
+            infra/scripts/ecs-deploy.sh ingest "${{ steps.images.outputs.ingest }}"
+          else
+            echo "No document or ingestion changes; skipping ingest."
+          fi
+
+  evals:
+    name: Post-deploy evals
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: needs.deploy.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.skip_evals != true)
+    timeout-minutes: 40
+    environment: production
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+      LANGSMITH_TRACING: "false"
+      EVAL_DELAY_S: "0.8"
+      API_URL: ${{ vars.APP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: evals/uv.lock
+      - name: Run the full eval suite against the live URL
+        working-directory: evals
+        run: |
+          uv sync --frozen
+          uv run python run_evals.py --api-url "$API_URL" --suite full
+
+  rollback:
+    name: Roll back failed release
+    runs-on: ubuntu-latest
+    needs: [deploy, evals]
+    if: always() && failure() && needs.deploy.outputs.backend_previous != ''
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Restore previous task definitions
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          chmod +x infra/scripts/ecs-deploy.sh
+          infra/scripts/ecs-deploy.sh rollback \
+            "${{ needs.deploy.outputs.backend_previous }}" \
+            "${{ needs.deploy.outputs.frontend_previous }}"
+      - run: echo "::error::Release failed; ECS services were rolled back to the previous task definitions."
+        if: always()
