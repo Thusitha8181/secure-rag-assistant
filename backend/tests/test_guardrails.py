@@ -85,6 +85,17 @@ def test_card_numbers_masked_for_everyone() -> None:
     assert "4111" not in out.text and out.entities == ["CREDIT_CARD"]
 
 
+def test_indian_ids_masked_even_without_valid_checksum() -> None:
+    out = get_pii_guard().redact_query("My Aadhaar is 2345 6789 0123 and PAN ABCDE1234F")
+    assert "2345 6789 0123" not in out.text and "ABCDE1234F" not in out.text
+    assert out.entities == ["IN_AADHAAR", "IN_PAN"]
+
+
+def test_bare_twelve_digit_numbers_are_not_aadhaar() -> None:
+    text = "Order number 234567890123 shipped"
+    assert get_pii_guard().redact_query(text).text == text
+
+
 def test_month_year_is_not_a_birth_date() -> None:
     text = "The company was born in 2018 and revenue in April 2024 was strong."
     assert get_pii_guard().redact(text, "employee").text == text

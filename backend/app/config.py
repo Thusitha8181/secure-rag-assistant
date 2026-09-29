@@ -43,9 +43,18 @@ class Settings(BaseSettings):
     dense_model: str = "BAAI/bge-small-en-v1.5"
     sparse_model: str = "Qdrant/bm25"
     model_cache_dir: str | None = None
+    # Cross-encoder applied to the fused hybrid candidates; empty disables reranking
+    reranker_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    rerank_candidates: int = 20
     retrieval_top_k: int = 6
     # Cosine similarity (dense) that counts as "relevant" for scope/access checks
     relevance_threshold: float = 0.62
+    # Deny when a restricted document out-scores the best authorized one: the authorized match
+    # is incidental and the answer would be a hollow "not found". Measured on the eval sets,
+    # the reranker lead is <= +0.7 for legitimate questions and >= +1.9 for cross-department
+    # ones; the dense-similarity margin is the fallback when reranking is disabled.
+    restricted_rerank_margin: float = 1.5
+    restricted_margin: float = 0.05
 
     # Data
     data_dir: Path = Field(default_factory=_default_data_dir)

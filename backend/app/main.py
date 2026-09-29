@@ -14,6 +14,8 @@ from app.observability.tracing import configure_tracing
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
+# Presidio warns about every recognizer for a language we don't load (es, it, pl, ...).
+logging.getLogger("presidio-analyzer").setLevel(logging.ERROR)
 log = logging.getLogger("app")
 
 INSECURE_SECRETS = {"", "dev-only-insecure-secret-change-me", "change-me-to-a-long-random-string"}

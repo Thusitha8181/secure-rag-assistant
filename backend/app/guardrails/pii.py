@@ -17,6 +17,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
+from typing import Any
 
 from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer, RecognizerResult
 from presidio_analyzer.nlp_engine import NlpEngineProvider
@@ -89,7 +90,21 @@ def _custom_recognizers() -> list[PatternRecognizer]:
             # "bear" because Presidio matches on spaCy lemmas and "born" lemmatizes to it.
             context=["birth", "born", "bear", "dob", "birthday"],
         ),
+        # Presidio's own Aadhaar recognizer drops numbers that fail the Verhoeff checksum, but a
+        # mistyped ID is still personal data. Context-gated so bare 12-digit numbers pass.
+        PatternRecognizer(
+            supported_entity="IN_AADHAAR",
+            patterns=[Pattern("aadhaar_like", r"\b[2-9]\d{3}[ -]?\d{4}[ -]?\d{4}\b", 0.3)],
+            context=["aadhaar", "aadhar", "uid", "uidai"],
+        ),
     ]
+
+
+def _indian_id_recognizers() -> list[Any]:
+    # Presidio ships these but does not load them into the default English registry.
+    from presidio_analyzer.predefined_recognizers import InAadhaarRecognizer, InPanRecognizer
+
+    return [InAadhaarRecognizer(), InPanRecognizer()]
 
 
 @dataclass
@@ -122,7 +137,7 @@ class PIIGuard:
         self.analyzer = AnalyzerEngine(
             nlp_engine=provider.create_engine(), supported_languages=["en"]
         )
-        for rec in _custom_recognizers():
+        for rec in [*_custom_recognizers(), *_indian_id_recognizers()]:
             self.analyzer.registry.add_recognizer(rec)
         self.anonymizer = AnonymizerEngine()
 

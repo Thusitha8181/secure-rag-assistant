@@ -1,6 +1,7 @@
-"""Local embeddings with FastEmbed (ONNX, no GPU, no API key).
+"""Local embeddings and reranking with FastEmbed (ONNX, no GPU, no API key).
 
 Dense: BAAI/bge-small-en-v1.5 (384-d). Sparse: Qdrant/bm25 (keyword signal for hybrid search).
+Reranker: a MiniLM cross-encoder that reorders the fused hybrid candidates.
 """
 
 from __future__ import annotations
@@ -26,6 +27,10 @@ class Embedder(Protocol):
     def embed_documents(self, texts: list[str]) -> tuple[list[list[float]], list[SparseVector]]: ...
 
     def embed_query(self, text: str) -> tuple[list[float], SparseVector]: ...
+
+
+class Reranker(Protocol):
+    def rerank(self, query: str, documents: list[str]) -> list[float]: ...
 
 
 def _load(cls: Any, model_name: str, cache_dir: str | None) -> Any:
@@ -75,10 +80,26 @@ class FastEmbedEmbedder:
         return dense, SparseVector(indices=s.indices.tolist(), values=s.values.tolist())
 
 
+class FastEmbedReranker:
+    def __init__(self, model: str, cache_dir: str | None = None) -> None:
+        from fastembed.rerank.cross_encoder import TextCrossEncoder
+
+        self._model = _load(TextCrossEncoder, model, cache_dir)
+
+    def rerank(self, query: str, documents: list[str]) -> list[float]:
+        return [float(x) for x in self._model.rerank(query, documents)]
+
+
 @lru_cache
 def get_embedder() -> Embedder:
     s = get_settings()
     return FastEmbedEmbedder(s.dense_model, s.sparse_model, s.model_cache_dir)
+
+
+@lru_cache
+def get_reranker() -> Reranker | None:
+    s = get_settings()
+    return FastEmbedReranker(s.reranker_model, s.model_cache_dir) if s.reranker_model else None
 
 
 if __name__ == "__main__":
@@ -87,4 +108,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.warmup:
         emb = get_embedder()
-        print(f"Embedding models ready (dense dim={emb.dense_dim})")
+        reranker = get_reranker()
+        print(f"Models ready (dense dim={emb.dense_dim}, reranker={reranker is not None})")

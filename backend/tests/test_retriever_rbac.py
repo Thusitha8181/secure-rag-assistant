@@ -90,7 +90,38 @@ def test_each_role_can_reach_its_own_departments(retriever: Retriever, role: Rol
 def test_restricted_departments_expose_names_only(retriever: Retriever) -> None:
     result = retriever.search("Aadhya Patel salary payroll", Role.EMPLOYEE)
     assert "hr" in result.restricted_departments
+    assert result.restricted_similarity > result.top_similarity
     assert all(c.department == "general" for c in result.chunks)
+
+
+class _KeywordReranker:
+    """Scores candidates by how many sensitive words they contain - an adversarial reranker."""
+
+    WORDS = ("salary", "payroll", "revenue", "margin", "kubernetes", "campaign")
+
+    def rerank(self, query: str, documents: list[str]) -> list[float]:
+        return [float(sum(w in d.lower() for w in self.WORDS)) for d in documents]
+
+
+@pytest.mark.parametrize("role", list(Role))
+def test_reranker_reorders_and_truncates_without_leaking(retriever: Retriever, role: Role) -> None:
+    reranked = Retriever(
+        retriever.client,
+        retriever.collection,
+        retriever.embedder,
+        top_k=3,
+        relevance_threshold=0.2,
+        reranker=_KeywordReranker(),
+        rerank_candidates=15,
+    )
+    for query in ATTACK_QUERIES:
+        res = reranked.search(query, role)
+        chunks = res.chunks
+        assert len(chunks) <= 3
+        assert [c.score for c in chunks] == sorted((c.score for c in chunks), reverse=True)
+        assert all(can_access(role, c.department) for c in chunks)
+        # Restricted chunks are scored for the denial decision but never returned.
+        assert (res.restricted_rerank_score is None) == (role is Role.C_LEVEL)
 
 
 class _FilterIgnoringClient:

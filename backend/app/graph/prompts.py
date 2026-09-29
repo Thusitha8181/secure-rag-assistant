@@ -13,7 +13,8 @@ Classify the user's latest message into exactly one intent:
 - "hr_analytics": aggregate or tabular questions over employee records that need computation,
   e.g. averages, counts, totals, rankings, "list all employees in X", "who has the highest Y".
   A question about ONE named employee's details is "company_question", not "hr_analytics".
-- "smalltalk": greetings, thanks, or questions about what the assistant can do.
+- "smalltalk": ONLY greetings, thanks, or questions about what the assistant can do. Any
+  request to produce content (a poem, story, joke, code, essay) is "out_of_scope".
 - "out_of_scope": unrelated to {COMPANY} or work here (general knowledge, trivia, coding help,
   creative writing, personal advice, current events, other companies).
 

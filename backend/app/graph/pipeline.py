@@ -197,7 +197,15 @@ def build_graph(deps: PipelineDeps) -> Any:
             "restricted_departments": res.restricted_departments,
             "guardrails": [],
         }
-        if res.top_similarity < s.relevance_threshold:
+        # Embedding similarity alone misfires (a finance "Q4 revenue" question sits nearer the
+        # marketing Q4 report), so the cross-encoder decides when it is available.
+        if res.best_rerank_score is not None and res.restricted_rerank_score is not None:
+            restricted_lead = res.restricted_rerank_score - res.best_rerank_score
+            restricted_wins = restricted_lead >= s.restricted_rerank_margin
+        else:
+            restricted_wins = res.restricted_similarity - res.top_similarity >= s.restricted_margin
+        restricted_wins = restricted_wins and bool(res.restricted_departments)
+        if res.top_similarity < s.relevance_threshold or restricted_wins:
             if res.restricted_departments:
                 updates["guardrails"].append(_guard("rbac", "denied", res.restricted_departments))
                 updates.update(
@@ -374,10 +382,12 @@ def default_deps(settings: Settings | None = None) -> PipelineDeps:
         retriever=get_retriever(),
         pii=get_pii_guard(),
         injection=InjectionGuard(prompt_guard_model(s), s.prompt_guard_threshold),
-        analyzer=classifier.with_structured_output(QueryAnalysis),
+        # Groq's forced tool calling is flaky with gpt-oss ("model did not call a tool");
+        # constrained JSON-schema decoding is not.
+        analyzer=classifier.with_structured_output(QueryAnalysis, method="json_schema"),
         generator=generator_model(s),
         sql_writer=chat_model(s.llm_model, temperature=0.0, settings=s).with_structured_output(
-            SQLQuery
+            SQLQuery, method="json_schema"
         ),
         hr_store=hr_store,
     )

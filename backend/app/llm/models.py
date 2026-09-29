@@ -16,6 +16,7 @@ def chat_model(
     *,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    max_retries: int = 2,
     settings: Settings | None = None,
 ) -> ChatGroq:
     s = settings or get_settings()
@@ -29,7 +30,7 @@ def chat_model(
         temperature=s.llm_temperature if temperature is None else temperature,
         max_tokens=max_tokens or s.llm_max_tokens,
         timeout=s.llm_timeout_s,
-        max_retries=2,
+        max_retries=max_retries,
         **kwargs,
     )
 
@@ -37,9 +38,11 @@ def chat_model(
 def generator_model(settings: Settings | None = None) -> Runnable:
     """Answer generator with automatic fallback to a second model on errors / rate limits."""
     s = settings or get_settings()
-    primary = chat_model(s.llm_model, settings=s)
     if not s.llm_fallback_model or s.llm_fallback_model == s.llm_model:
-        return primary
+        return chat_model(s.llm_model, settings=s)
+    # Fail over at once: retrying a daily-quota 429 on the primary only adds latency, and the
+    # extra calls push the fallback past its per-minute limit too.
+    primary = chat_model(s.llm_model, max_retries=0, settings=s)
     return primary.with_fallbacks([chat_model(s.llm_fallback_model, settings=s)])
 
 

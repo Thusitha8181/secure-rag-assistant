@@ -16,7 +16,7 @@ from app.guardrails.pii import get_pii_guard
 from app.hr.store import HRStore
 from app.ingestion.models import Chunk
 from app.rbac.policy import Department
-from app.retrieval.retriever import Retriever
+from app.retrieval.retriever import RetrievalResult, RetrievedChunk, Retriever
 from app.retrieval.store import ensure_collection, upsert_chunks
 from tests.conftest import FakeEmbedder
 
@@ -124,6 +124,62 @@ async def test_access_denied_names_department_only(retriever):
     assert out["status"] == "access_denied"
     assert "Finance" in out["answer"]
     assert "60" not in out["answer"]
+
+
+class _StubRetriever:
+    def __init__(self, result: RetrievalResult) -> None:
+        self.result = result
+
+    def search(self, query: str, role: str, k: int | None = None) -> RetrievalResult:
+        return self.result
+
+
+def _general_hit(
+    top: float, restricted: float, rerank: tuple[float, float] | None = None
+) -> RetrievalResult:
+    chunk = RetrievedChunk(
+        "g1",
+        "FinSolve is a FinTech company",
+        "general/handbook.md",
+        "Handbook",
+        "",
+        "general",
+        "document",
+        top,
+    )
+    authorized_rerank, restricted_rerank = rerank or (None, None)
+    return RetrievalResult(
+        [chunk], top, ["finance"], restricted, authorized_rerank, restricted_rerank
+    )
+
+
+async def test_access_denied_when_restricted_source_clearly_wins():
+    # An incidental handbook match must not turn "what was our gross margin?" into a hollow
+    # "not found" answer when the finance report is the obvious source.
+    graph = make_graph(_StubRetriever(_general_hit(top=0.70, restricted=0.85)))  # type: ignore[arg-type]
+    out = await run(graph, "What was FinSolve's gross margin?", "employee")
+    assert out["status"] == "access_denied"
+    assert "Finance" in out["answer"]
+
+
+async def test_reranker_overrides_similarity_when_authorized_answer_holds_up():
+    # The restricted doc is closer by embedding, but the cross-encoder rates both equally.
+    hit = _general_hit(top=0.70, restricted=0.85, rerank=(6.0, 6.5))
+    out = await run(make_graph(_StubRetriever(hit)), "Q4 revenue?", "employee")  # type: ignore[arg-type]
+    assert out["status"] == "answered"
+
+
+async def test_reranker_denies_when_restricted_doc_clearly_answers_better():
+    # Similarity is a near tie, but only the restricted doc actually answers the question.
+    hit = _general_hit(top=0.70, restricted=0.72, rerank=(-6.0, 3.0))
+    out = await run(make_graph(_StubRetriever(hit)), "Top salaries?", "employee")  # type: ignore[arg-type]
+    assert out["status"] == "access_denied"
+
+
+async def test_near_tie_with_restricted_source_still_answers():
+    graph = make_graph(_StubRetriever(_general_hit(top=0.70, restricted=0.72)))  # type: ignore[arg-type]
+    out = await run(graph, "Tell me about FinSolve", "employee")
+    assert out["status"] == "answered"
 
 
 async def test_hr_analytics_denied_for_non_hr(retriever):
