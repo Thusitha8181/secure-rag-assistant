@@ -45,6 +45,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+        with:
+          # action-setup reads packageManager from the repo-root package.json;
+          # this app keeps it in frontend/package.json, so pin the version here.
+          version: 11.21.0
+          run_install: false
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
